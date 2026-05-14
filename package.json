@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server.mjs",
+    "serve:local": "npm run build && npm run start"
   },
   "dependencies": {
+    "express": "^5.2.1",
     "html5-qrcode": "^2.3.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

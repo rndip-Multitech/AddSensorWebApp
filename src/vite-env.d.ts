@@ -7,3 +7,10 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+interface Window {
+  __APP_RUNTIME_CONFIG__?: {
+    useGatewayProxy?: boolean;
+    requireProxyAccessKey?: boolean;
+  };
+}

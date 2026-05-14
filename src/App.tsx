@@ -3,11 +3,13 @@ import { Html5Qrcode } from "html5-qrcode";
 import {
   createGatewaySession,
   getWhoAmI,
+  logoutGateway,
   postLoraRestart,
   postSave,
   postWhitelistDevice,
   putWhitelistEnabled,
   type GatewayCredentials,
+  type GatewaySession,
   type WhitelistDeviceBody,
 } from "./gatewayApi";
 import { parseDeviceImport } from "./bulkImport";
@@ -20,6 +22,9 @@ import {
 import { normalizeHex, parseQrPayload, type ParsedCredentials } from "./parseQr";
 
 function describeGatewayError(error: unknown): string {
+  if (error instanceof Error && /another ip address/i.test(error.message)) {
+    return `${error.message} Use "Disconnect gateway" to clear the existing API session, then try again.`;
+  }
   if (error instanceof TypeError && /fetch/i.test(error.message)) {
     return "Failed to reach the gateway. Check the address, HTTPS setting, and that the gateway is reachable from this PC.";
   }
@@ -55,6 +60,13 @@ export default function App() {
   const [recentGateways, setRecentGateways] = useState<string[]>(loadRecentGateways);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [proxyAccessKey, setProxyAccessKey] = useState(() => {
+    try {
+      return localStorage.getItem("proxyAccessKey") ?? "";
+    } catch {
+      return "";
+    }
+  });
 
   const [defaultAppeui, setDefaultAppeui] = useState("");
   const [deviceClass, setDeviceClass] = useState("A");
@@ -72,6 +84,7 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testingGateway, setTestingGateway] = useState(false);
+  const [disconnectingGateway, setDisconnectingGateway] = useState(false);
   const [gatewayConnected, setGatewayConnected] = useState(false);
 
   const [gatewayStatus, setGatewayStatus] = useState<string | null>(null);
@@ -93,13 +106,22 @@ export default function App() {
 
   const resolvedBase = resolveGatewayBase(gatewayBase, gatewayScheme);
   const effectiveAppeui = normalizeHex(appeui) || normalizeHex(defaultAppeui);
-  const isWorking = busy || testingGateway || importingFile;
+  const isWorking = busy || testingGateway || importingFile || disconnectingGateway;
+  const proxyAccessKeyRequired = Boolean(window.__APP_RUNTIME_CONFIG__?.requireProxyAccessKey);
 
   useEffect(() => {
     setGatewayConnected(false);
     setGatewayStatus(null);
     setGatewayError(null);
   }, [gatewayBase, gatewayScheme, username, password]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("proxyAccessKey", proxyAccessKey);
+    } catch {
+      /* ignore */
+    }
+  }, [proxyAccessKey]);
 
   const applyParsed = useCallback((parsed: ParsedCredentials) => {
     setDeveui(parsed.deveui);
@@ -235,6 +257,40 @@ export default function App() {
     setRecentGateways(loadRecentGateways());
   };
 
+  const disconnectGateway = async () => {
+    setGatewayStatus(null);
+    setGatewayError(null);
+
+    if (!resolvedBase) {
+      setGatewayError("Enter the gateway address.");
+      return;
+    }
+
+    if (proxyAccessKeyRequired && !proxyAccessKey.trim()) {
+      setGatewayError("Proxy access key is required.");
+      return;
+    }
+
+    let credentials: GatewayCredentials;
+    try {
+      credentials = getCredentials();
+    } catch (error) {
+      setGatewayError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+
+    setDisconnectingGateway(true);
+    try {
+      await logoutGateway(resolvedBase, { credentials });
+      setGatewayConnected(false);
+      setGatewayStatus("Gateway session cleared.");
+    } catch (error) {
+      setGatewayError(describeGatewayError(error));
+    } finally {
+      setDisconnectingGateway(false);
+    }
+  };
+
   const testGateway = async () => {
     setGatewayStatus(null);
     setGatewayError(null);
@@ -248,6 +304,11 @@ export default function App() {
       return;
     }
 
+    if (proxyAccessKeyRequired && !proxyAccessKey.trim()) {
+      setGatewayError("Proxy access key is required.");
+      return;
+    }
+
     let credentials: GatewayCredentials;
     try {
       credentials = getCredentials();
@@ -257,18 +318,32 @@ export default function App() {
     }
 
     setTestingGateway(true);
+    let session: GatewaySession | undefined;
+    let verifiedMessage: string | null = null;
+    let logoutFailure: string | null = null;
     try {
-      const session = await createGatewaySession(resolvedBase, credentials);
+      session = await createGatewaySession(resolvedBase, credentials);
       const whoami = await getWhoAmI(resolvedBase, session);
       setGatewayConnected(true);
-      setGatewayStatus(
-        `Connected${whoami.user ? ` as ${whoami.user}` : ""}${whoami.permission ? ` (${whoami.permission})` : ""}.`,
-      );
+      verifiedMessage = `Connected${whoami.user ? ` as ${whoami.user}` : ""}${whoami.permission ? ` (${whoami.permission})` : ""}.`;
       rememberSuccessfulGateway();
     } catch (error) {
       setGatewayConnected(false);
       setGatewayError(describeGatewayError(error));
     } finally {
+      if (session?.token) {
+        try {
+          await logoutGateway(resolvedBase, { session });
+        } catch (error) {
+          logoutFailure = `Gateway verified, but failed to close the API session: ${describeGatewayError(error)}`;
+        }
+      }
+      if (verifiedMessage) {
+        setGatewayStatus(`${verifiedMessage} Session closed.`);
+      }
+      if (logoutFailure) {
+        setGatewayError(logoutFailure);
+      }
       setTestingGateway(false);
     }
   };
@@ -282,6 +357,11 @@ export default function App() {
 
     if (!resolvedBase) {
       setGatewayError("Enter the gateway address.");
+      return;
+    }
+
+    if (proxyAccessKeyRequired && !proxyAccessKey.trim()) {
+      setGatewayError("Proxy access key is required.");
       return;
     }
 
@@ -300,7 +380,8 @@ export default function App() {
 
     setImportingFile(true);
 
-    let session;
+    let session: GatewaySession | undefined;
+    let logoutFailure: string | null = null;
     try {
       session = await createGatewaySession(resolvedBase, credentials);
       setGatewayConnected(true);
@@ -352,6 +433,16 @@ export default function App() {
     } catch (error) {
       setImportError(error instanceof Error ? error.message : String(error));
     } finally {
+      if (session?.token) {
+        try {
+          await logoutGateway(resolvedBase, { session });
+        } catch (error) {
+          logoutFailure = `Import finished, but failed to close the API session: ${describeGatewayError(error)}`;
+        }
+      }
+      if (logoutFailure) {
+        setImportError(logoutFailure);
+      }
       setImportingFile(false);
     }
   };
@@ -363,6 +454,11 @@ export default function App() {
 
     if (!resolvedBase) {
       setGatewayError("Enter the gateway address.");
+      return;
+    }
+
+    if (proxyAccessKeyRequired && !proxyAccessKey.trim()) {
+      setGatewayError("Proxy access key is required.");
       return;
     }
 
@@ -395,7 +491,8 @@ export default function App() {
 
     setBusy(true);
 
-    let session;
+    let session: GatewaySession | undefined;
+    let logoutFailure: string | null = null;
     try {
       session = await createGatewaySession(resolvedBase, credentials);
       setGatewayConnected(true);
@@ -433,6 +530,16 @@ export default function App() {
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : String(error));
     } finally {
+      if (session?.token) {
+        try {
+          await logoutGateway(resolvedBase, { session });
+        } catch (error) {
+          logoutFailure = `Sensor updated, but failed to close the API session: ${describeGatewayError(error)}`;
+        }
+      }
+      if (logoutFailure) {
+        setSubmitError(logoutFailure);
+      }
       setBusy(false);
     }
   };
@@ -453,10 +560,24 @@ export default function App() {
             <span
               style={{
                 ...indicatorDotStyle,
-                background: testingGateway ? "#f59e0b" : gatewayConnected ? "#22c55e" : "#94a3b8",
+                background: disconnectingGateway
+                  ? "#f59e0b"
+                  : testingGateway
+                    ? "#f59e0b"
+                    : gatewayConnected
+                      ? "#22c55e"
+                      : "#94a3b8",
               }}
             />
-            <span>{testingGateway ? "Checking" : gatewayConnected ? "Connected" : "Not connected"}</span>
+            <span>
+              {disconnectingGateway
+                ? "Disconnecting"
+                : testingGateway
+                  ? "Checking"
+                  : gatewayConnected
+                    ? "Connected"
+                    : "Not connected"}
+            </span>
           </div>
         </div>
 
@@ -508,9 +629,25 @@ export default function App() {
           </div>
         </div>
 
+        {proxyAccessKeyRequired && (
+          <div style={{ marginTop: "0.9rem" }}>
+            <label style={labelStyle}>Proxy access key</label>
+            <input
+              type="password"
+              value={proxyAccessKey}
+              onChange={(event) => setProxyAccessKey(event.target.value)}
+              style={inputStyle}
+              autoComplete="off"
+            />
+          </div>
+        )}
+
         <div style={buttonRowStyle}>
           <button type="button" disabled={isWorking} onClick={() => void testGateway()} style={btnSecondary}>
             {testingGateway ? "Testing..." : "Test gateway"}
+          </button>
+          <button type="button" disabled={isWorking} onClick={() => void disconnectGateway()} style={btnSecondary}>
+            {disconnectingGateway ? "Disconnecting..." : "Disconnect gateway"}
           </button>
         </div>
 

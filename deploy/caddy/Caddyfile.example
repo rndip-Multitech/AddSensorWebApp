@@ -1,0 +1,37 @@
+# Example: trusted LAN proxy for a single MultiTech gateway
+#
+# Replace:
+# - gw-089.example.com with the hostname users will enter in the app
+# - https://onboarding.example.com with your Vercel/custom frontend URL
+# - 192.168.0.89 with the actual gateway IP
+# - certificate paths with your real certificate and key
+#
+# This assumes:
+# - the proxy machine is on the same LAN as the gateway
+# - the browser trusts the certificate presented by this proxy hostname
+# - the upstream MultiTech gateway may use a self-signed certificate
+
+gw-089.example.com {
+    tls /etc/caddy/certs/gw-089.crt /etc/caddy/certs/gw-089.key
+
+    @preflight method OPTIONS
+    handle @preflight {
+        header Access-Control-Allow-Origin "https://onboarding.example.com"
+        header Access-Control-Allow-Methods "GET,POST,PUT,DELETE,OPTIONS"
+        header Access-Control-Allow-Headers "Content-Type"
+        header Access-Control-Max-Age "86400"
+        respond "" 204
+    }
+
+    reverse_proxy https://192.168.0.89 {
+        header_up Host 192.168.0.89
+
+        transport http {
+            tls_insecure_skip_verify
+        }
+
+        header_down Access-Control-Allow-Origin "https://onboarding.example.com"
+        header_down Access-Control-Allow-Methods "GET,POST,PUT,DELETE,OPTIONS"
+        header_down Access-Control-Allow-Headers "Content-Type"
+    }
+}

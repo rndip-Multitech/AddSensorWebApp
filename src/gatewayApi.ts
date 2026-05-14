@@ -42,13 +42,38 @@ function withToken(path: string, token?: string): string {
   return `${path}${separator}token=${encodeURIComponent(token)}`;
 }
 
+function withCredentials(path: string, credentials?: GatewayCredentials): string {
+  if (!credentials) return path;
+  const params = new URLSearchParams({
+    username: credentials.username,
+    password: credentials.password,
+  });
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}${params.toString()}`;
+}
+
+function shouldUseGatewayProxy(): boolean {
+  if (import.meta.env.DEV) return true;
+  return Boolean(window.__APP_RUNTIME_CONFIG__?.useGatewayProxy);
+}
+
+function getProxyAccessKey(): string {
+  try {
+    return localStorage.getItem("proxyAccessKey")?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
 function buildRequest(base: string, path: string, headers: HeadersInit): { url: string; headers: HeadersInit } {
-  if (import.meta.env.DEV && /^https?:\/\//i.test(base)) {
+  if (shouldUseGatewayProxy() && /^https?:\/\//i.test(base)) {
+    const proxyAccessKey = getProxyAccessKey();
     return {
       url: `/__gateway__${path}`,
       headers: {
         ...headers,
         "X-Gateway-Target": base,
+        ...(proxyAccessKey ? { "X-Proxy-Access-Key": proxyAccessKey } : {}),
       },
     };
   }
@@ -121,6 +146,29 @@ export async function getWhoAmI(
     result?: GatewayWhoAmI;
   };
   return payload.result ?? {};
+}
+
+export async function logoutGateway(
+  base: string,
+  options: {
+    session?: GatewaySession;
+    credentials?: GatewayCredentials;
+  },
+): Promise<void> {
+  const path = options.session?.token
+    ? withToken("/api/logout", options.session.token)
+    : withCredentials("/api/logout", options.credentials);
+
+  if (path === "/api/logout") {
+    throw new Error("Logout requires either a session token or gateway credentials.");
+  }
+
+  const request = buildRequest(base, path, commandHeaders());
+  const res = await fetch(request.url, {
+    method: "GET",
+    headers: request.headers,
+  });
+  if (!res.ok) throw new Error(await readError(res));
 }
 
 export type WhitelistDeviceBody = {
