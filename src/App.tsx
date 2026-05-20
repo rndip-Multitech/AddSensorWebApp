@@ -23,6 +23,12 @@ import {
   type GatewayScheme,
 } from "./gatewayUrl";
 import { normalizeHex, parseQrPayload, type ParsedCredentials } from "./parseQr";
+import {
+  DEFAULT_DEVICE_PROFILE_ID,
+  DEFAULT_NETWORK_PROFILE_ID,
+  DEVICE_PROFILE_OPTIONS,
+  NETWORK_PROFILE_OPTIONS,
+} from "./profileOptions";
 
 function SectionStatus({
   success,
@@ -70,8 +76,8 @@ export default function App() {
 
   const [defaultAppeui, setDefaultAppeui] = useState("");
   const [deviceClass, setDeviceClass] = useState("A");
-  const [deviceProfileId, setDeviceProfileId] = useState("");
-  const [networkProfileId, setNetworkProfileId] = useState("");
+  const [deviceProfileId, setDeviceProfileId] = useState<string>(DEFAULT_DEVICE_PROFILE_ID);
+  const [networkProfileId, setNetworkProfileId] = useState<string>(DEFAULT_NETWORK_PROFILE_ID);
 
   const [rawQrPayload, setRawQrPayload] = useState("");
   const [parsedDeviceName, setParsedDeviceName] = useState("");
@@ -873,22 +879,32 @@ export default function App() {
 
             <div style={twoColumnGridStyle}>
               <div>
-                <label style={labelStyle}>Device profile id</label>
-                <input
+                <label style={labelStyle}>Device profile</label>
+                <select
                   value={deviceProfileId}
                   onChange={(event) => setDeviceProfileId(event.target.value)}
-                  placeholder="LW102-OTA-US915"
                   style={inputStyle}
-                />
+                >
+                  {DEVICE_PROFILE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
-                <label style={labelStyle}>Network profile id</label>
-                <input
+                <label style={labelStyle}>Network profile</label>
+                <select
                   value={networkProfileId}
                   onChange={(event) => setNetworkProfileId(event.target.value)}
-                  placeholder="DEFAULT-CLASS-A"
                   style={inputStyle}
-                />
+                >
+                  {NETWORK_PROFILE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
