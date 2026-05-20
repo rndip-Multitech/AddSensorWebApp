@@ -2,12 +2,15 @@ import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, ty
 import { Html5Qrcode } from "html5-qrcode";
 import {
   createGatewaySession,
+  describeGatewayError,
   getWhoAmI,
+  isDirectBrowserGatewayMode,
   logoutGateway,
   postLoraRestart,
   postSave,
   postWhitelistDevice,
   putWhitelistEnabled,
+  usesBuiltInGatewayProxy,
   type GatewayCredentials,
   type GatewaySession,
   type WhitelistDeviceBody,
@@ -20,16 +23,6 @@ import {
   type GatewayScheme,
 } from "./gatewayUrl";
 import { normalizeHex, parseQrPayload, type ParsedCredentials } from "./parseQr";
-
-function describeGatewayError(error: unknown): string {
-  if (error instanceof Error && /another ip address/i.test(error.message)) {
-    return `${error.message} Use "Disconnect gateway" to clear the existing API session, then try again.`;
-  }
-  if (error instanceof TypeError && /fetch/i.test(error.message)) {
-    return "Failed to reach the gateway. Check the address, HTTPS setting, and that the gateway is reachable from this PC.";
-  }
-  return error instanceof Error ? error.message : String(error);
-}
 
 function SectionStatus({
   success,
@@ -63,6 +56,13 @@ export default function App() {
   const [proxyAccessKey, setProxyAccessKey] = useState(() => {
     try {
       return localStorage.getItem("proxyAccessKey") ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const [proxyBaseUrl, setProxyBaseUrl] = useState(() => {
+    try {
+      return localStorage.getItem("gatewayProxyBaseUrl") ?? "";
     } catch {
       return "";
     }
@@ -107,7 +107,20 @@ export default function App() {
   const resolvedBase = resolveGatewayBase(gatewayBase, gatewayScheme);
   const effectiveAppeui = normalizeHex(appeui) || normalizeHex(defaultAppeui);
   const isWorking = busy || testingGateway || importingFile || disconnectingGateway;
+  const showHostedProxyFields = !usesBuiltInGatewayProxy();
   const proxyAccessKeyRequired = Boolean(window.__APP_RUNTIME_CONFIG__?.requireProxyAccessKey);
+  const showProxyAccessKeyField = proxyAccessKeyRequired || Boolean(proxyBaseUrl.trim());
+  const gatewayBlockedMessage = [gatewayError, submitError, importError].find(
+    (message) => message && /cors|access-control|blocked the gateway request/i.test(message),
+  );
+  const showCorsHelp =
+    showHostedProxyFields &&
+    Boolean(gatewayBlockedMessage || ((submitError || importError) && !proxyBaseUrl.trim()));
+  const showCertHelp =
+    Boolean(gatewayError) &&
+    isDirectBrowserGatewayMode() &&
+    /^https:\/\//i.test(resolvedBase) &&
+    !showCorsHelp;
 
   useEffect(() => {
     setGatewayConnected(false);
@@ -123,6 +136,14 @@ export default function App() {
     }
   }, [proxyAccessKey]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("gatewayProxyBaseUrl", proxyBaseUrl.trim());
+    } catch {
+      /* ignore */
+    }
+  }, [proxyBaseUrl]);
+
   const applyParsed = useCallback((parsed: ParsedCredentials) => {
     setDeveui(parsed.deveui);
     setAppeui(parsed.appeui);
@@ -136,34 +157,6 @@ export default function App() {
         : "QR parsed successfully.",
     );
   }, []);
-
-  const onDecoded = useCallback(
-    (text: string) => {
-      const parsed = parseQrPayload(text);
-      if (!parsed) {
-        setQrStatus(null);
-        setQrError("QR format was not recognized.");
-        return;
-      }
-
-      setRawQrPayload(text);
-      applyParsed(parsed);
-    },
-    [applyParsed],
-  );
-
-  const parseManualQr = () => {
-    setQrStatus(null);
-    setQrError(null);
-
-    const parsed = parseQrPayload(rawQrPayload);
-    if (!parsed) {
-      setQrError("Could not parse the pasted QR text.");
-      return;
-    }
-
-    applyParsed(parsed);
-  };
 
   const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -183,7 +176,7 @@ export default function App() {
       setImportFileName(file.name);
       setImportStatus(`${result.devices.length} devices ready from ${file.name}.`);
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : String(error));
+      setImportError(describeGatewayError(error));
     } finally {
       event.target.value = "";
     }
@@ -208,6 +201,35 @@ export default function App() {
 
     setScanning(false);
   }, []);
+
+  const onDecoded = useCallback(
+    (text: string) => {
+      const parsed = parseQrPayload(text);
+      if (!parsed) {
+        setQrStatus(null);
+        setQrError("QR format was not recognized.");
+        return;
+      }
+
+      setRawQrPayload(text);
+      applyParsed(parsed);
+      void stopScanner();
+    },
+    [applyParsed, stopScanner],
+  );
+
+  const parseManualQr = () => {
+    setQrStatus(null);
+    setQrError(null);
+
+    const parsed = parseQrPayload(rawQrPayload);
+    if (!parsed) {
+      setQrError("Could not parse the pasted QR text.");
+      return;
+    }
+
+    applyParsed(parsed);
+  };
 
   const startScanner = useCallback(async () => {
     setQrStatus(null);
@@ -250,6 +272,28 @@ export default function App() {
       username: trimmedUsername,
       password: trimmedPassword,
     };
+  };
+
+  const getExternalProxyValidationError = (): string | null => {
+    if (!showHostedProxyFields) {
+      return null;
+    }
+
+    const trimmedProxyBaseUrl = proxyBaseUrl.trim();
+    if (!trimmedProxyBaseUrl) {
+      return "Enter the local proxy URL in Connect to gateway when using the hosted app.";
+    }
+
+    try {
+      const parsed = new URL(trimmedProxyBaseUrl);
+      if (!/^https?:$/.test(parsed.protocol)) {
+        return "Local proxy URL must start with http:// or https://.";
+      }
+    } catch {
+      return "Local proxy URL is not a valid URL.";
+    }
+
+    return null;
   };
 
   const rememberSuccessfulGateway = () => {
@@ -339,7 +383,10 @@ export default function App() {
         }
       }
       if (verifiedMessage) {
-        setGatewayStatus(`${verifiedMessage} Session closed.`);
+        const hostedProxyReminder = showHostedProxyFields && !proxyBaseUrl.trim()
+          ? " Add/import from this hosted app still needs the local proxy URL."
+          : "";
+        setGatewayStatus(`${verifiedMessage} Session closed.${hostedProxyReminder}`);
       }
       if (logoutFailure) {
         setGatewayError(logoutFailure);
@@ -367,6 +414,12 @@ export default function App() {
 
     if (importDevices.length === 0) {
       setImportError("Choose a CSV or JSON file first.");
+      return;
+    }
+
+    const proxyValidationError = getExternalProxyValidationError();
+    if (proxyValidationError) {
+      setImportError(proxyValidationError);
       return;
     }
 
@@ -408,7 +461,7 @@ export default function App() {
           importedCount += 1;
         } catch (error) {
           failures.push(
-            `Row ${index + 1} (${device.deveui}): ${error instanceof Error ? error.message : String(error)}`,
+            `Row ${index + 1} (${device.deveui}): ${describeGatewayError(error)}`,
           );
         }
       }
@@ -431,7 +484,7 @@ export default function App() {
         );
       }
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : String(error));
+      setImportError(describeGatewayError(error));
     } finally {
       if (session?.token) {
         try {
@@ -489,6 +542,12 @@ export default function App() {
       return;
     }
 
+    const proxyValidationError = getExternalProxyValidationError();
+    if (proxyValidationError) {
+      setSubmitError(proxyValidationError);
+      return;
+    }
+
     setBusy(true);
 
     let session: GatewaySession | undefined;
@@ -528,7 +587,7 @@ export default function App() {
           : "Sensor added to the whitelist.",
       );
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : String(error));
+      setSubmitError(describeGatewayError(error));
     } finally {
       if (session?.token) {
         try {
@@ -629,7 +688,24 @@ export default function App() {
           </div>
         </div>
 
-        {proxyAccessKeyRequired && (
+        {showHostedProxyFields && (
+          <div style={{ marginTop: "0.9rem" }}>
+            <label style={labelStyle}>Local proxy URL</label>
+            <input
+              value={proxyBaseUrl}
+              onChange={(event) => setProxyBaseUrl(event.target.value)}
+              placeholder="http://192.168.0.10:3000"
+              style={inputStyle}
+              autoComplete="off"
+            />
+            <p style={hintStyle}>
+              Required when using the hosted app from Vercel. Run <code>npm run serve:local</code> on a
+              PC on the same Wi-Fi as the gateway, then enter that PC&apos;s address here.
+            </p>
+          </div>
+        )}
+
+        {showProxyAccessKeyField && (
           <div style={{ marginTop: "0.9rem" }}>
             <label style={labelStyle}>Proxy access key</label>
             <input
@@ -652,6 +728,32 @@ export default function App() {
         </div>
 
         <SectionStatus success={gatewayStatus} error={gatewayError} />
+        {showCorsHelp && (
+          <div style={certHelpStyle}>
+            <p style={{ margin: 0 }}>
+              Login can succeed, but the browser blocks follow-up API calls (POST/PUT) from this hosted
+              site to the gateway because of CORS. Run the local proxy on your network, enter its URL
+              above, add the proxy access key if configured, then retry.
+            </p>
+          </div>
+        )}
+        {showCertHelp && (
+          <div style={certHelpStyle}>
+            <p style={{ margin: 0 }}>
+              First-time HTTPS gateway connection may require certificate trust in the browser. Open the
+              gateway directly in this same browser, accept the warning, then return here and try again.
+            </p>
+            <div style={buttonRowStyle}>
+              <button
+                type="button"
+                onClick={() => window.open(resolvedBase, "_blank", "noopener,noreferrer")}
+                style={btnSecondary}
+              >
+                Open gateway directly
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       <div style={tabsRowStyle}>
@@ -1075,4 +1177,14 @@ const statusErrorStyle: CSSProperties = {
   background: "#fef2f2",
   border: "1px solid #fecaca",
   color: "#b91c1c",
+};
+
+const certHelpStyle: CSSProperties = {
+  marginTop: "0.75rem",
+  padding: "0.85rem 0.9rem",
+  borderRadius: 10,
+  background: "#eff6ff",
+  border: "1px solid #bfdbfe",
+  color: "#1e3a8a",
+  fontSize: "0.92rem",
 };

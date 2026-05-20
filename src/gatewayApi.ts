@@ -52,9 +52,26 @@ function withCredentials(path: string, credentials?: GatewayCredentials): string
   return `${path}${separator}${params.toString()}`;
 }
 
-function shouldUseGatewayProxy(): boolean {
+export function getConfiguredProxyBaseUrl(): string {
+  try {
+    return localStorage.getItem("gatewayProxyBaseUrl")?.trim().replace(/\/$/, "") || "";
+  } catch {
+    return "";
+  }
+}
+
+export function shouldUseGatewayProxy(): boolean {
   if (import.meta.env.DEV) return true;
-  return Boolean(window.__APP_RUNTIME_CONFIG__?.useGatewayProxy);
+  if (window.__APP_RUNTIME_CONFIG__?.useGatewayProxy) return true;
+  return Boolean(getConfiguredProxyBaseUrl());
+}
+
+export function usesBuiltInGatewayProxy(): boolean {
+  return import.meta.env.DEV || Boolean(window.__APP_RUNTIME_CONFIG__?.useGatewayProxy);
+}
+
+export function isDirectBrowserGatewayMode(): boolean {
+  return !shouldUseGatewayProxy();
 }
 
 function getProxyAccessKey(): string {
@@ -68,8 +85,9 @@ function getProxyAccessKey(): string {
 function buildRequest(base: string, path: string, headers: HeadersInit): { url: string; headers: HeadersInit } {
   if (shouldUseGatewayProxy() && /^https?:\/\//i.test(base)) {
     const proxyAccessKey = getProxyAccessKey();
+    const proxyPrefix = usesBuiltInGatewayProxy() ? "" : getConfiguredProxyBaseUrl();
     return {
-      url: `/__gateway__${path}`,
+      url: `${proxyPrefix}/__gateway__${path}`,
       headers: {
         ...headers,
         "X-Gateway-Target": base,
@@ -82,6 +100,33 @@ function buildRequest(base: string, path: string, headers: HeadersInit): { url: 
     url: joinUrl(base, path),
     headers,
   };
+}
+
+export function describeGatewayError(error: unknown): string {
+  if (error instanceof Error && /another ip address/i.test(error.message)) {
+    return `${error.message} Use "Disconnect gateway" to clear the existing API session, then try again.`;
+  }
+
+  if (error instanceof Error && /(cors|access-control)/i.test(error.message)) {
+    return (
+      "The browser blocked the gateway request because of CORS. " +
+      "Run the local proxy on a PC on the same network as the gateway, enter its URL in Connect to gateway, " +
+      "and try again."
+    );
+  }
+
+  if (error instanceof TypeError && /fetch/i.test(error.message) && isDirectBrowserGatewayMode()) {
+    return (
+      "The browser blocked the gateway request (often CORS or an untrusted HTTPS certificate). " +
+      "From the hosted app, use the local proxy URL. From direct HTTPS mode, open the gateway in this browser first to trust the certificate."
+    );
+  }
+
+  if (error instanceof TypeError && /fetch/i.test(error.message)) {
+    return "Failed to reach the gateway. Check the address, HTTPS setting, proxy URL, and that the gateway is reachable from this PC.";
+  }
+
+  return error instanceof Error ? error.message : String(error);
 }
 
 export async function probeGateway(base: string): Promise<number> {

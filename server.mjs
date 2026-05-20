@@ -68,6 +68,42 @@ const allowedGatewayCidrs = (process.env.ALLOWED_GATEWAY_CIDRS || "")
   .map((value) => value.trim())
   .filter(Boolean)
   .map(parseIpv4Cidr);
+const proxyCorsOrigins = (process.env.PROXY_CORS_ORIGINS || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+function isProxyCorsOriginAllowed(origin) {
+  if (!origin) {
+    return false;
+  }
+
+  if (proxyCorsOrigins.includes("*")) {
+    return true;
+  }
+
+  if (proxyCorsOrigins.length > 0) {
+    return proxyCorsOrigins.includes(origin);
+  }
+
+  return Boolean(proxyAccessKey);
+}
+
+function applyProxyCors(req, res) {
+  const origin = req.get("Origin");
+  if (!isProxyCorsOriginAllowed(origin)) {
+    return;
+  }
+
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, X-Gateway-Target, X-Proxy-Access-Key",
+  );
+  res.setHeader("Access-Control-Max-Age", "86400");
+}
 
 function ipv4ToInteger(hostname) {
   if (net.isIP(hostname) !== 4) {
@@ -199,6 +235,11 @@ app.get("/runtime-config.js", (_req, res) => {
   );
 });
 
+app.options("/__gateway__", (req, res) => {
+  applyProxyCors(req, res);
+  res.sendStatus(204);
+});
+
 app.use(
   "/__gateway__",
   express.raw({
@@ -209,6 +250,7 @@ app.use(
 );
 
 app.use("/__gateway__", (req, res) => {
+  applyProxyCors(req, res);
   if (proxyAccessKey && req.get("x-proxy-access-key") !== proxyAccessKey) {
     res.status(401).json({
       error: "Missing or invalid proxy access key.",

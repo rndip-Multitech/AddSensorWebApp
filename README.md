@@ -168,16 +168,18 @@ This project is ready for a Vercel preview deployment as a static frontend.
 
 If your hosted preview fails to connect to a gateway because of certificate trust problems like `ERR_CERT_AUTHORITY_INVALID`, use the local production proxy above or see `DEPLOYMENT_PROXY.md` for LAN proxy architecture options.
 
+If login works from Vercel but add/import fails with a CORS error, the gateway is blocking `POST`/`PUT` from the hosted site. Run the local proxy on a PC on the same Wi-Fi, set `PROXY_CORS_ORIGINS` to your Vercel URL in `.env.local-server`, then enter that PC's proxy URL in the hosted app's **Local proxy URL** field.
+
 ## Production network assumptions
 
-This app currently talks from the browser directly to the MultiTech gateway API.
+On Vercel, the browser may reach `GET /api/login` directly after you trust the gateway certificate, but follow-up API calls such as whitelist `POST`/`PUT` are usually blocked by gateway CORS.
 
-For a Vercel-hosted deployment to work reliably, the user device must:
+For a reliable Vercel deployment:
 
-- be on the same network as the gateway
-- reach the gateway over `https://`
-- trust the gateway certificate
-- be allowed by the gateway/browser to make cross-origin API requests
+- run `npm run serve:local` on a PC on the same network as the gateway
+- bind it to the LAN if phones need it (`HOST=0.0.0.0`)
+- set `PROXY_ACCESS_KEY` and `PROXY_CORS_ORIGINS=https://your-app.vercel.app`
+- enter that proxy URL in the hosted app (not a fixed gateway hostname in the proxy config)
 
 If any of those are not true, you will likely need a proxy or local bridge instead of direct browser-to-gateway access.
 
