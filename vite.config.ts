@@ -128,7 +128,10 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const target = env.VITE_DEV_GATEWAY_TARGET?.replace(/\/$/, "") || "";
 
+  const isMobileBuild = mode === "mobile";
+
   return {
+    base: isMobileBuild ? "./" : "/",
     plugins: [react(), dynamicGatewayProxy(target)],
   };
 });

@@ -1,3 +1,6 @@
+import { gatewayFetch } from "./gatewayFetch";
+import { isNativeApp } from "./platform";
+
 export type GatewayCredentials = { username: string; password: string };
 export type GatewaySession = { token?: string };
 export type GatewayWhoAmI = {
@@ -21,7 +24,7 @@ function joinUrl(base: string, path: string): string {
   return `${b}${p}`;
 }
 
-async function readError(res: Response): Promise<string> {
+async function readError(res: { text: () => Promise<string>; status: number; statusText?: string }): Promise<string> {
   const t = await res.text();
   try {
     const j = JSON.parse(t) as {
@@ -30,9 +33,9 @@ async function readError(res: Response): Promise<string> {
       status?: string;
       result?: { message?: string; error?: string };
     };
-    return j.message || j.error || j.result?.message || j.result?.error || t || res.statusText;
+    return j.message || j.error || j.result?.message || j.result?.error || t || `HTTP ${res.status}`;
   } catch {
-    return t || res.statusText;
+    return t || `HTTP ${res.status}`;
   }
 }
 
@@ -61,14 +64,18 @@ export function getConfiguredProxyBaseUrl(): string {
 }
 
 export function shouldUseGatewayProxy(): boolean {
+  if (isNativeApp()) return false;
   if (import.meta.env.DEV) return true;
   if (window.__APP_RUNTIME_CONFIG__?.useGatewayProxy) return true;
   return Boolean(getConfiguredProxyBaseUrl());
 }
 
 export function usesBuiltInGatewayProxy(): boolean {
+  if (isNativeApp()) return false;
   return import.meta.env.DEV || Boolean(window.__APP_RUNTIME_CONFIG__?.useGatewayProxy);
 }
+
+export { isNativeApp } from "./platform";
 
 export function isDirectBrowserGatewayMode(): boolean {
   return !shouldUseGatewayProxy();
@@ -115,6 +122,13 @@ export function describeGatewayError(error: unknown): string {
     );
   }
 
+  if (isNativeApp() && error instanceof Error && /(certificate|ssl|trust|secure connection)/i.test(error.message)) {
+    return (
+      "Could not verify the gateway HTTPS certificate. Confirm you are on the same network as the gateway " +
+      "and the gateway address is correct."
+    );
+  }
+
   if (error instanceof TypeError && /fetch/i.test(error.message) && isDirectBrowserGatewayMode()) {
     return (
       "The browser blocked the gateway request (often CORS or an untrusted HTTPS certificate). " +
@@ -123,7 +137,9 @@ export function describeGatewayError(error: unknown): string {
   }
 
   if (error instanceof TypeError && /fetch/i.test(error.message)) {
-    return "Failed to reach the gateway. Check the address, HTTPS setting, proxy URL, and that the gateway is reachable from this PC.";
+    return isNativeApp()
+      ? "Failed to reach the gateway. Check the address, HTTPS setting, and that this device is on the same network as the gateway."
+      : "Failed to reach the gateway. Check the address, HTTPS setting, proxy URL, and that the gateway is reachable from this PC.";
   }
 
   return error instanceof Error ? error.message : String(error);
@@ -131,7 +147,7 @@ export function describeGatewayError(error: unknown): string {
 
 export async function probeGateway(base: string): Promise<number> {
   const request = buildRequest(base, "/api/login", commandHeaders());
-  const res = await fetch(request.url, {
+  const res = await gatewayFetch(request.url, {
     method: "GET",
     headers: request.headers,
   });
@@ -152,7 +168,7 @@ export async function createGatewaySession(
   });
 
   const request = buildRequest(base, `/api/login?${params.toString()}`, commandHeaders());
-  const res = await fetch(request.url, {
+  const res = await gatewayFetch(request.url, {
     method: "GET",
     headers: request.headers,
   });
@@ -181,7 +197,7 @@ export async function getWhoAmI(
   }
 
   const request = buildRequest(base, withToken("/api/whoami", session.token), commandHeaders());
-  const res = await fetch(request.url, {
+  const res = await gatewayFetch(request.url, {
     method: "GET",
     headers: request.headers,
   });
@@ -209,7 +225,7 @@ export async function logoutGateway(
   }
 
   const request = buildRequest(base, path, commandHeaders());
-  const res = await fetch(request.url, {
+  const res = await gatewayFetch(request.url, {
     method: "GET",
     headers: request.headers,
   });
@@ -235,7 +251,7 @@ export async function postWhitelistDevice(
     withToken("/api/loraNetwork/whitelist/devices", session?.token),
     jsonHeaders(),
   );
-  const res = await fetch(request.url, {
+  const res = await gatewayFetch(request.url, {
     method: "POST",
     headers: request.headers,
     body: JSON.stringify(body),
@@ -245,7 +261,7 @@ export async function postWhitelistDevice(
 
 export async function postSave(base: string, session?: GatewaySession): Promise<void> {
   const request = buildRequest(base, withToken("/api/command/save", session?.token), commandHeaders());
-  const res = await fetch(request.url, {
+  const res = await gatewayFetch(request.url, {
     method: "POST",
     headers: request.headers,
     body: "",
@@ -255,7 +271,7 @@ export async function postSave(base: string, session?: GatewaySession): Promise<
 
 export async function postLoraRestart(base: string, session?: GatewaySession): Promise<void> {
   const request = buildRequest(base, withToken("/api/lora/restart", session?.token), commandHeaders());
-  const res = await fetch(request.url, {
+  const res = await gatewayFetch(request.url, {
     method: "POST",
     headers: request.headers,
     body: "",
@@ -270,7 +286,7 @@ export async function putWhitelistEnabled(
   session?: GatewaySession,
 ): Promise<void> {
   const request = buildRequest(base, withToken("/api/loraNetwork/whitelist", session?.token), jsonHeaders());
-  const res = await fetch(request.url, {
+  const res = await gatewayFetch(request.url, {
     method: "PUT",
     headers: request.headers,
     body: JSON.stringify({ enabled }),

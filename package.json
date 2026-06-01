@@ -6,11 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",
+    "build:mobile": "tsc -p tsconfig.app.json --noEmit && vite build --mode mobile",
     "preview": "vite preview",
     "start": "node server.mjs",
-    "serve:local": "npm run build && npm run start"
+    "serve:local": "npm run build && npm run start",
+    "cap:sync": "npm run build:mobile && npx cap sync && powershell -ExecutionPolicy Bypass -File scripts/apply-native-config.ps1",
+    "cap:android": "npm run cap:sync && npx cap open android",
+    "cap:ios": "npm run cap:sync && npx cap open ios"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/cli": "^8.3.4",
+    "@capacitor/core": "^8.3.4",
+    "@capacitor/ios": "^8.3.4",
     "express": "^5.2.1",
     "html5-qrcode": "^2.3.8",
     "react": "^19.0.0",

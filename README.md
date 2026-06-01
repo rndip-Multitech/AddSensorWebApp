@@ -9,6 +9,18 @@ npm install
 npm run dev
 ```
 
+## Mobile app (iOS / Android)
+
+Capacitor wraps the same React UI for on-site onboarding (direct LAN access to the gateway, no browser CORS).
+
+```bash
+npm run cap:sync      # build mobile web assets + copy to native projects
+npm run cap:android   # open Android Studio (device on same Wi‑Fi as gateway)
+npm run cap:ios       # open Xcode on macOS
+```
+
+See **[docs/MOBILE_APP.md](docs/MOBILE_APP.md)** for permissions, TLS, and device testing.
+
 ## Local production proxy
 
 This repo now includes a real local backend proxy server for production-style use on a laptop or local PC.
@@ -150,9 +162,21 @@ To remove it:
 .\scripts\remove-startup-task.ps1
 ```
 
-## Vercel deployment
+## Public hosting (recommended: AWS Lightsail / EC2)
 
-This project is ready for a Vercel preview deployment as a static frontend.
+For a public URL with **no user-visible proxy setup**, host the **full Node app** (`server.mjs` + built UI), not static-only hosting.
+
+- See **[docs/AWS_HOSTING.md](docs/AWS_HOSTING.md)** for what works, security, and Lightsail steps.
+- Build and run with Docker: `docker build -t sensor-onboarding .` then run with `.env.local-server` mounted or passed as env vars.
+- Users open your HTTPS URL and enter **gateway address + credentials** only (same-origin `/__gateway__` proxy).
+
+**Important:** the AWS server must be able to **reach** the gateway IP you enter (public gateway, VPN, Tailscale, etc.). A cloud host cannot reach a random customer `192.168.x.x` on a private LAN by itself.
+
+Architecture options: **[docs/ARCHITECTURE_OPTIONS.md](docs/ARCHITECTURE_OPTIONS.md)**.
+
+## Vercel deployment (optional / demo)
+
+This project can also be deployed to Vercel as a **static frontend only** (limited for LAN gateways).
 
 ### Deploy
 

@@ -1,0 +1,12 @@
+<!-- Merge into ios/App/App/Info.plist after `npx cap add ios` -->
+<!--
+  <key>NSCameraUsageDescription</key>
+  <string>Scan sensor QR codes for onboarding.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Connect to the MultiTech gateway on your network to add sensors.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+-->

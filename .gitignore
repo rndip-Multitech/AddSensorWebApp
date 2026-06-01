@@ -21,3 +21,12 @@ dist-ssr
 .env.local
 .env.*.local
 .env.local-server
+
+# Capacitor native builds
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+ios/App/DerivedData/
+ios/App/Pods/
+*.xcuserstate

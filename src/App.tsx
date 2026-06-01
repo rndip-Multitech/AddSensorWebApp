@@ -10,6 +10,7 @@ import {
   postSave,
   postWhitelistDevice,
   putWhitelistEnabled,
+  isNativeApp,
   usesBuiltInGatewayProxy,
   type GatewayCredentials,
   type GatewaySession,
@@ -113,7 +114,7 @@ export default function App() {
   const resolvedBase = resolveGatewayBase(gatewayBase, gatewayScheme);
   const effectiveAppeui = normalizeHex(appeui) || normalizeHex(defaultAppeui);
   const isWorking = busy || testingGateway || importingFile || disconnectingGateway;
-  const showHostedProxyFields = !usesBuiltInGatewayProxy();
+  const showHostedProxyFields = !usesBuiltInGatewayProxy() && !isNativeApp();
   const proxyAccessKeyRequired = Boolean(window.__APP_RUNTIME_CONFIG__?.requireProxyAccessKey);
   const showProxyAccessKeyField = proxyAccessKeyRequired || Boolean(proxyBaseUrl.trim());
   const gatewayBlockedMessage = [gatewayError, submitError, importError].find(
